@@ -5,34 +5,28 @@
     обновление определяется по версии и должно быть старше текущей 
   3.Скачивание производится с репозитория Github файл firmwareList.txt
   4.Выводится информация о разделах текущий и обновляемый Serial port
-  5.Web server def:http://192.168.58.216
+  5.
 */
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
+//#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <ArduinoOTA.h> //обновление по воздуху
 #include <SPIFFS.h> //файловая система
 #include <esp_ota_ops.h> //чтение информации о разделах
 #include <ESPAsyncWebServer.h>
-#include <functional> // позволяет передавать различные виды вызываемых объектов, включая лямбда-выражения
-
 
 
 //глобальные переменные firmware
-const String currentVersion = "1.0.5";
-const String firmwareVersion = "";
+const String firmwareVersion = "1.0.3";
 const String firmwareListURL = "https://raw.githubusercontent.com/CosmoCraic/test/main/firmwareList.txt";
-unsigned long lastCheckTime = 0; // Время последней проверки обновлений
-const unsigned long checkInterval = 15 * 60 * 1000; // Интервал проверки (например, 15 минут)
-bool checkingUpdates = false; // Флаг проверки наличия обновлений
-bool isUpdating = false; // Флаг общего процесса обновления
-bool isUpdateAvailable = false; // Флаг наличия доступного обновления
-bool isDownloading = false; // Флаг процесса скачивания
-bool isDownloadComplete = false; // Флаг успешного завершения скачивания
-bool isInstalling = false; // Флаг процесса установки обновления
-String newFirmwareURL = ""; // URL новой прошивки
-const int totalBlocks = 20; // Общее количество блоков в строке прогресса
+bool isUpdating = false;
+bool isUpdateAvailable = false;
+bool isDownloading = false;
+bool isInstalling = false;
+String newFirmwareURL = ""; //хранение ссылки на новую версию прошивки
 
+const long updateInterval = 15 * 60 * 1000; // X минут в миллисекундах
+unsigned long lastUpdateTime = 0;
 //bool lowActivityUpdate = false; //включение опции поиска и установки обновления в период низкой активности
 
 //глобальные переменные WiFi
@@ -61,14 +55,14 @@ void setup() {
 
 void loop() {
   checkWiFiConnection();
-     
-      // Проверка обновлений через регулярные интервалы
-    if (millis() - lastCheckTime > checkInterval) {
-        lastCheckTime = millis(); // Обновляем время последней проверки
-        isUpdating = true; // Устанавливаем флаг для начала проверки обновлений
-    }
-  firmwareStatus(); // Управление процессом обновления
-
+  firmwareStatus();
+  
+    
+    // Регулярная проверка обновлений
+  if (WiFi.status() == WL_CONNECTED && millis() - lastUpdateTime > updateInterval) {
+    checkForUpdates();
+    lastUpdateTime = millis(); // Обновить время последней проверки
+  }
 
   ArduinoOTA.handle();
 }
@@ -103,7 +97,7 @@ void checkWiFiConnection() {
       Serial.println(WiFi.localIP());
       isConnected = true;
        // Проверка обновлений при каждом успешном подключении к WiFi
-      checkForUpdates();
+      //checkForUpdates();
     }
   } else {
     isConnected = false;
@@ -124,49 +118,63 @@ void checkWiFiConnection() {
 //_________________________________________
 //обновление прошивки начало
 //_________________________________________
+
+
+//____функция проверки флагов и состояний обновления________
 void firmwareStatus() {
     if (isUpdating) {
-        if (checkingUpdates) {
-            checkForUpdates();
-            checkingUpdates = false;
-        } else if (isUpdateAvailable && !isDownloading && !isDownloadComplete) {
-            downloadAndUpdate();
-        } else if (isDownloadComplete && !isInstalling) {
-            performUpdate();
+        String firmwareURL = checkForUpdates();
+        if (!firmwareURL.isEmpty()) {
+            isUpdateAvailable = true;
+            newFirmwareURL = firmwareURL; // Сохраняем URL для загрузки
+        } else {
+            Serial.println("Обновлений нет или ошибка при проверке.");
         }
+        isUpdating = false;
+    }
+
+    if (isUpdateAvailable && !isDownloading) {
+        if (downloadAndUpdate(newFirmwareURL)) {
+            isDownloading = true;
+        } else {
+            Serial.println("Ошибка при загрузке обновления.");
+        }
+        isUpdateAvailable = false;
+    }
+
+    if (isDownloading && !isInstalling) {
+        if (performUpdate()) {
+            isInstalling = true;
+        } else {
+            Serial.println("Ошибка при установке обновления.");
+        }
+        isDownloading = false;
     }
 }
 
 
-void checkForUpdates() {
-    if (!isUpdating) return;
+//_______Функция проверки наличия новой версии прошивки__________
 
-    checkingUpdates = true;
+String checkForUpdates() {
     Serial.println("Проверка новой версии прошивки. Скачиваем файл firmwareList...");
-
     HTTPClient http;
     http.begin(firmwareListURL);
     int httpCode = http.GET();
 
     if (httpCode == 200) {
         String payload = http.getString();
-        newFirmwareURL = parseFirmwareList(payload, currentVersion);
+        String newFirmwareURL = parseFirmwareList(payload, firmwareVersion);
+        http.end();
         if (!newFirmwareURL.isEmpty()) {
-            Serial.println("Найдено обновление. Скачивание...");
-            isUpdateAvailable = true;
+            return newFirmwareURL;
         } else {
             Serial.println("Нет доступных обновлений.");
-            isUpdateAvailable = false;
-            isUpdating = false; // Сброс флага, так как обновление не требуется
         }
     } else {
-        Serial.printf("Ошибка HTTP: %s\n", http.errorToString(httpCode).c_str());
-        isUpdateAvailable = false;
-        isUpdating = false; // Сброс флага из-за ошибки при проверке
+        Serial.println("Ошибка HTTP: " + http.errorToString(httpCode));
     }
-
     http.end();
-    checkingUpdates = false;
+    return "";
 }
 
 String parseFirmwareList(const String& payload, const String& currentVersion) {
@@ -195,7 +203,6 @@ String parseFirmwareList(const String& payload, const String& currentVersion) {
     }
 
     return latest_version_url;
-
 }
 
 bool is_newer_version(const String& new_version, const String& current_version) {
@@ -213,20 +220,20 @@ bool is_newer_version(const String& new_version, const String& current_version) 
 }
 
 
-void downloadAndUpdate() {
-    if (!isUpdateAvailable || isDownloading || isInstalling) return;
-
-    isDownloading = true;
-
+bool downloadAndUpdate(const String& url) {
     WiFiClientSecure client;
-    client.setInsecure(); // Используется для HTTPS-соединений без проверки сертификата
+    client.setInsecure(); // Используйте эту опцию, если сертификат SSL не может быть проверен
+
+    Serial.println("Начинаем загрузку прошивки с URL: " + url);
 
     HTTPClient http;
-    http.begin(client, newFirmwareURL); // Используем URL новой прошивки
+    http.begin(client, url);
+    Serial.print("[HTTP] Начинаем... ");
+    Serial.println(url);
+  
     int httpCode = http.GET();
 
     if (httpCode > 0) {
-        // Обработка перенаправления URL
         if (httpCode == HTTP_CODE_FOUND || httpCode == HTTP_CODE_MOVED_PERMANENTLY) {
             String newUrl = http.getLocation();
             http.end();
@@ -235,18 +242,12 @@ void downloadAndUpdate() {
         }
 
         if (httpCode == HTTP_CODE_OK) {
-            Serial.println("Успешное подключение, начало загрузки файла...");
-
-            int totalLength = http.getSize();
-            WiFiClient *stream = http.getStreamPtr();
-
+            WiFiClient * stream = http.getStreamPtr();
             File updateFile = SPIFFS.open("/update.bin", "w");
             if (!updateFile) {
                 Serial.println("Не удалось открыть файл для записи");
-                isDownloading = false;
-                isUpdateAvailable = false;
-                isUpdating = false; // Сброс флага обновления из-за ошибки
-                return;
+                http.end();
+                return false;
             }
 
             const size_t bufferSize = 1024;
@@ -254,86 +255,54 @@ void downloadAndUpdate() {
             int bytesRead;
             int totalBytes = 0;
 
-            while (totalBytes < totalLength && (bytesRead = stream->readBytes(buffer, bufferSize)) > 0) {
+            while ((bytesRead = stream->readBytes(buffer, bufferSize)) > 0) {
                 updateFile.write(buffer, bytesRead);
                 totalBytes += bytesRead;
-
-                // Визуализация прогресса скачивания
-                int progressPercent = (totalBytes * 100) / totalLength;
-                int blocksFilled = (progressPercent * totalBlocks) / 100;
-                String progressBar = "[";
-                for (int i = 0; i < totalBlocks; i++) {
-                    progressBar += (i < blocksFilled) ? "■" : " ";
-                }
-                progressBar += "]";
-                Serial.printf("Прогресс скачивания: %d%% %s\n", progressPercent, progressBar.c_str());
+                Serial.print(".");
             }
             updateFile.close();
-
-            Serial.println("Загрузка завершена.");
-            isDownloadComplete = true;
+            Serial.println("\nЗагрузка завершена. Записано байт: " + String(totalBytes));
+            http.end();
+            return true;
         } else {
-            Serial.printf("Ошибка HTTP при загрузке файла: %s\n", http.errorToString(httpCode).c_str());
-            isDownloadComplete = false;
-            isUpdating = false;
+            Serial.println("Ошибка HTTP при загрузке файла: " + http.errorToString(httpCode));
         }
     } else {
-        Serial.printf("Ошибка соединения: %s\n", http.errorToString(httpCode).c_str());
-        isDownloadComplete = false;
-        isUpdating = false;
+        Serial.println("Ошибка соединения: " + http.errorToString(httpCode));
     }
-
     http.end();
-    isDownloading = false;
-    isUpdateAvailable = false;
+    return false;
 }
 
 
 //функция установки скачанной прошивки
-void performUpdate() {
-    if (!isDownloadComplete || isInstalling) return;
-
-    isInstalling = true; // Устанавливаем флаг начала установки
-
+bool performUpdate() {
     File updateFile = SPIFFS.open("/update.bin", "r");
     if (!updateFile) {
         Serial.println("Не удалось открыть файл обновления");
-        isInstalling = false;
-        isDownloadComplete = false;
-        isUpdating = false; // Сбрасываем флаг обновления из-за ошибки
-        return;
+        return false;
     }
 
     if (Update.begin(updateFile.size())) {
         size_t written = Update.writeStream(updateFile);
         if (written == updateFile.size()) {
             Serial.println("Обновление завершено");
-            if (Update.end(true)) { // true для применения обновления, если оно успешно записано
+            if (Update.end(true)) {
                 Serial.println("Обновление успешно установлено!");
-                ESP.restart(); // Перезагрузка устройства
-                // После перезагрузки все флаги будут сброшены, но для ясности можно добавить сброс здесь
-                isUpdating = false;
-                isDownloadComplete = false;
-                isInstalling = false;
+                ESP.restart();
+                return true;
             } else {
                 Serial.println("Ошибка завершения обновления: " + String(Update.getError()));
-                isUpdating = false; // Сброс флага из-за ошибки завершения
             }
         } else {
             Serial.println("Ошибка записи обновления");
-            isUpdating = false; // Сброс флага из-за ошибки записи
         }
         updateFile.close();
     } else {
         Serial.println("Недостаточно места для обновления");
-        isUpdating = false; // Сброс флага из-за недостатка места
     }
-
-    // Сброс флагов после попытки установки
-    isDownloadComplete = false;
-    isInstalling = false;
+    return false;
 }
-
 
 
 //_________________________________________
@@ -380,6 +349,16 @@ void printPartitionInfo() {
 //_________________________________________
 //работа с web сервером начало
 //_________________________________________
+
+String processor(const String& var){
+  if(var == "FIRMWARE_VERSION"){
+    return firmwareVersion;
+  }
+  return String();
+}
+
+//_________________________________________
+
 //HTML страница
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
@@ -415,39 +394,28 @@ const char index_html[] PROGMEM = R"rawliteral(
                 .then((data) => {
                     document.getElementById('updateResult').innerText = data;
                 });
-        }
-    </script>
-</body>
-</html>
+            }
+        </script>
+    </body>
+  </html>
 )rawliteral";
-
-
 
 //настройка маршрутов
 void setupWebServer() {
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    String html = String(index_html); // Копирование HTML-шаблона из PROGMEM
-    html.replace("%FIRMWARE_VERSION%", currentVersion); // Замена плейсхолдера
-    Serial.println(html);
-    request->send_P(200, "text/html", html.c_str());
-    });
-    
-
-    server.on("/update-check", HTTP_GET, [](AsyncWebServerRequest *request) {
-    isUpdating = true; // Установка флага для начала процесса обновления
-    request->send_P(200, "text/plain", "Инициирована проверка обновлений...");
+        request->send_P(200, "text/html", index_html, processor);
     });
 
-    server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
-        String status = "{\"updating\": " + String(isUpdating) + 
-                        ", \"checking\": " + String(checkingUpdates) +
-                        ", \"available\": " + String(isUpdateAvailable) +
-                        ", \"downloading\": " + String(isDownloading) +
-                        ", \"downloadComplete\": " + String(isDownloadComplete) +
-                        ", \"installing\": " + String(isInstalling) + "}";
-        request->send(200, "application/json", status);
+    server.on("/update-check", HTTP_GET, [](AsyncWebServerRequest *request){
+        isUpdating = true; // Устанавливаем флаг для начала процесса проверки обновлений
+        String responseMessage;
+        if (checkForUpdates()) {
+            responseMessage = "Доступно обновление. Версия: " + newFirmwareURL; // или любая другая информация о версии
+        } else {
+            responseMessage = "Обновлений нет или произошла ошибка.";
+        }
+        request->send(200, "text/plain", responseMessage);
     });
-
 
     // Дополнительные маршруты можно добавить здесь
 }
