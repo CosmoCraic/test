@@ -6,3 +6,5 @@
 1.0.5;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.5.bin
 1.0.6;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.6.bin
 1.0.7;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.7.ino.esp32.bin
+1.0.8;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.8.ino.esp32.bin
+
