@@ -1,12 +1,2 @@
 1.0.0;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.0.bin
 1.0.1;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.1.bin
-1.0.2;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.2.bin
-1.0.3;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.3.bin
-1.0.4;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.4.bin
-1.0.5;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.5.bin
-1.0.6;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.6.bin
-1.0.7;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.7.ino.esp32.bin
-1.0.8;https://github.com/CosmoCraic/test/raw/main/firmware_v1.0.8.ino.esp32.bin
-1.0.9;https://github.com/CosmoCraic/test/raw/main/firmware_v2.0.2.1.ino.esp32.bin
-1.0.10;https://github.com/CosmoCraic/test/raw/main/firmware_v2.0.2.2.ino.esp32.bin
-1.0.11;https://github.com/CosmoCraic/test/raw/main/firmware_v2.0.2.4.ino.esp32.bin
